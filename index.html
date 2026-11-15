@@ -79,7 +79,7 @@ details{background:var(--soft);padding:12px;border-radius:9px;margin:8px 0}summa
  <div class="confirm-card">
   <div style="font-size:30px;margin-bottom:8px" aria-hidden="true">⚠️</div>
   <h2 id="submitConfirmTitle">Confirm final submission</h2>
-  <p id="submitConfirmText">Once you submit, you cannot modify your answers. Your examination will be marked and your results saved on this device. Are you sure you want to submit now?</p>
+  <p id="submitConfirmText">Once you submit, you cannot modify your answers. Your examination will be marked and your results saved on this device and, when online, sent to the teacher dashboard. Are you sure you want to submit now?</p>
   <div class="confirm-actions"><button type="button" id="confirmSubmitNo">Go back</button><button type="button" id="confirmSubmitYes">Yes, submit</button></div>
  </div>
 </div>
@@ -107,6 +107,7 @@ details{background:var(--soft);padding:12px;border-radius:9px;margin:8px 0}summa
  <button type="button" id="submit" class="no-print" style="width:100%;margin-top:10px;border-color:var(--bad);color:var(--bad)">Submit examination</button>
 </section>
 <section id="results" hidden>
+ <p id="cloudSaveStatus" class="small muted" role="status" aria-live="polite">Results will be securely sent to the teacher dashboard when submitted online.</p>
  <div class="panel result-overview">
   <div class="small muted">EXAMINATION SUBMITTED</div>
   <h2>Results dashboard</h2>
@@ -131,8 +132,12 @@ details{background:var(--soft);padding:12px;border-radius:9px;margin:8px 0}summa
 <p class="small muted" id="notice" style="text-align:center">Ready to begin. This app works offline.</p>
 <div id="reminder" hidden role="dialog" aria-modal="true" aria-labelledby="reminderTitle"><div class="panel"><div class="small muted">TIME CHECK</div><h2 id="reminderTitle">30-minute reminder</h2><p id="reminderText">You have 60 minutes remaining.</p><button class="primary" id="dismissReminder" style="width:100%">Continue examination</button></div></div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (()=>{
+const SUPABASE_URL='https://hjldvsnvopasjjywbfei.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_LDUfSEKC937Nqx061QQhMw_wHjnfL6G';
+const cloudClient=window.supabase?.createClient?window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY):null;
 const $=id=>document.getElementById(id);
 const norm=s=>String(s??'').toLowerCase().trim().replace(/[’']/g,"'").replace(/[.!?,]/g,'').replace(/\s+/g,' ');
 const sections=[
@@ -200,7 +205,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 function renderTabs(){$('tabs').innerHTML=sections.map((s,i)=>`<button data-tab="${i}" class="${i===idx?'active':''}">${i+1}. ${s.name}</button>`).join('')}
 function renderItem(it,si,ei,qi,manual){
  const k=key(si,ei,qi),v=answers[k]||'';
- if(Array.isArray(it)){return `<div class="q"><label class="prompt" for="a${k}">${qi+1}. ${it[0]}</label>${it[2]==='long'?`<textarea class="answer" id="a${k}" data-key="${k}" placeholder="Write your paragraph here...">${esc(v)}</textarea>`:`<input class="answer" id="a${k}" data-key="${k}" type="text" value="${esc(v)}" placeholder="Your answer">`}</div>`}
+ if(Array.isArray(it)){return `<div class="q"><label class="prompt" for="a${k}">${qi+1}. ${it[0]}</label>${it[2]==='long'?`<textarea class="answer" id="a${k}" data-key="${k}" placeholder="Write your paragraph here...">${esc(v)}</textarea><div class="small muted" id="wordCount-${k}" aria-live="polite">${(String(v).match(/\b[\w'-]+\b/g)||[]).length} words</div>`:`<input class="answer" id="a${k}" data-key="${k}" type="text" value="${esc(v)}" placeholder="Your answer">`}</div>`}
  return `<div class="q"><div class="prompt">${qi+1}. ${it.q}</div><div class="options">${it.opts.map(o=>`<label><input type="radio" name="r${k}" class="answer" data-key="${k}" value="${esc(o)}" ${v===o?'checked':''}> ${esc(o)}</label>`).join('')}</div></div>`;
 }
 function updateProgress(){let a=all(),n=a.filter(x=>String(answers[key(x.s,x.e,x.q)]||'').trim()).length;$('answered').textContent=`${n} / ${a.length}`}
@@ -237,7 +242,7 @@ $('discardDraft').onclick=()=>{if(confirm('Discard the saved examination? This c
 $('clearHistory').onclick=()=>{if(confirm('Delete all saved previous grades from this device?')){localStorage.removeItem(HISTORY_KEY);renderHistory()}};
 $('dismissReminder').onclick=()=>{$('reminder').hidden=true};
 $('tabs').onclick=e=>{let b=e.target.closest('[data-tab]');if(b){idx=+b.dataset.tab;render();saveDraft();window.scrollTo({top:0,left:0,behavior:'smooth'})}};
-$('questions').addEventListener('input',e=>{if(e.target.classList.contains('answer')){answers[e.target.dataset.key]=e.target.value;updateProgress();saveDraft()}});
+$('questions').addEventListener('input',e=>{if(e.target.classList.contains('answer')){answers[e.target.dataset.key]=e.target.value;if(e.target.tagName==='TEXTAREA'){const counter=$('wordCount-'+e.target.dataset.key);if(counter)counter.textContent=(e.target.value.match(/\b[\w'-]+\b/g)||[]).length+' words'}updateProgress();saveDraft()}});
 $('questions').addEventListener('change',e=>{if(e.target.classList.contains('answer')){answers[e.target.dataset.key]=e.target.value;updateProgress();saveDraft()}});
 function renderReview(){
  const items=all();
@@ -400,7 +405,7 @@ function finish(auto=false){
  if(!auto){$('submitConfirm').hidden=false;$('confirmSubmitYes').focus();return;}
  completeSubmission(true);
 }
-function completeSubmission(auto=false){
+async function completeSubmission(auto=false){
  if(submitted)return;
  submitted=true;$('submitConfirm').hidden=true;clearInterval(timer);$('exam').hidden=true;$('results').hidden=false;
  studentName=$('studentNameInput').value.trim();$('resultStudentName').textContent=studentName;
@@ -414,6 +419,16 @@ function completeSubmission(auto=false){
  drawBreakdown(result.detail);drawCorrections();
  const history=safeRead(HISTORY_KEY,[]);history.push({name:studentName,score:automatic,detail:result.detail,date:new Date().toISOString()});try{localStorage.setItem(HISTORY_KEY,JSON.stringify(history.slice(-100)));localStorage.removeItem(DRAFT_KEY)}catch(e){}renderHistory();
  $('notice').textContent=auto?'Time is up. Examination submitted.':'Examination submitted.';window.scrollTo({top:0,left:0,behavior:'smooth'});celebrateSubmission();
+ const cloudStatus=$('cloudSaveStatus');
+ if(!cloudClient){cloudStatus.textContent='Cloud saving is unavailable in this browser session. Your result is saved on this device; connect to the internet and use a supported browser.';cloudStatus.style.color='#a45b00';}
+ else {
+  cloudStatus.textContent='Sending your result securely to the teacher dashboard…';
+  try {
+   const {error}=await cloudClient.from('assessment_results').insert({student_name:studentName,submitted_at:new Date().toISOString(),total_score:automatic,section_scores:result.detail,submitted_answers:answers,writing_feedback:window.writingFeedback||'',app_version:'1.1.0'});
+   if(error)throw error;
+   cloudStatus.textContent='Your result has been saved to the teacher dashboard.';cloudStatus.style.color='#16834b';
+  } catch(err) { console.error('Cloud result submission failed:',err);cloudStatus.textContent='Cloud saving failed. Your result is still available on this device; please inform your teacher.';cloudStatus.style.color='#a45b00'; }
+ }
 }
 $('submit').onclick=()=>finish(false);
 $('confirmSubmitNo').onclick=()=>{$('submitConfirm').hidden=true;$('submit').focus()};
